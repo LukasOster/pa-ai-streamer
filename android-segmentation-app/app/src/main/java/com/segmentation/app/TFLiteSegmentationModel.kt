@@ -155,11 +155,8 @@ class TFLiteSegmentationModel(private val context: Context) {
                     // Check GPU compatibility
                     val compatList = CompatibilityList()
                     if (compatList.isDelegateSupportedOnThisDevice) {
-                        val gpuOptions = GpuDelegate.Options().apply {
-                            setQuantizedModelsAllowed(true)
-                            setPrecisionLossAllowed(true)
-                        }
-                        gpuDelegate = GpuDelegate(gpuOptions)
+                        // Use compatibility list to get best GPU options for this device
+                        gpuDelegate = GpuDelegate(compatList.bestOptionsForThisDevice)
                         addDelegate(gpuDelegate)
                         Log.d(TAG, "GPU delegate configured")
                     } else {
