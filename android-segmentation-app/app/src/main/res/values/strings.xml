@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Segmentation App</string>
+    <string name="camera_permission_required">Camera permission is required for this app</string>
+    <string name="permission_denied">Permission denied</string>
+</resources>
