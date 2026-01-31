@@ -44,6 +44,17 @@ android {
     androidResources {
         noCompress += "tflite"
     }
+
+    // Required for large model files
+    aaptOptions {
+        noCompress("tflite")
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -66,6 +77,8 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-gpu:2.13.0")
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.13.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    // Required for models with TensorFlow Select ops (like FlexErf)
+    implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0")
 
     // Coroutines for async processing
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

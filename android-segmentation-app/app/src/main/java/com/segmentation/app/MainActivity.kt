@@ -27,30 +27,33 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Main Activity for Real-time Segmentation App
+ * Main Activity for Real-time ML Inference App
  *
- * ARCHITECTURE OVERVIEW:
- * - CameraManager: Handles CameraX preview and frame extraction
- * - TFLiteSegmentationModel: Runs TensorFlow Lite inference
- * - SegmentationRenderer: Draws mask overlay on SurfaceView
+ * Supports both:
+ * - Object Detection (bounding boxes)
+ * - Semantic Segmentation (pixel masks)
  *
- * THREADING MODEL:
- * - UI Thread: Updates UI elements, handles user input
- * - Camera Analysis Thread: Extracts frames from camera (never blocked)
- * - Inference Thread: Runs TFLite model (separate from camera thread)
- * - Render Thread: Draws mask overlay (via SurfaceView)
+ * Model type is auto-detected or can be explicitly configured.
  *
- * FRAME FLOW:
- * 1. Camera captures frame → Analysis thread
- * 2. Every Nth frame sent to inference thread
- * 3. Inference produces mask → Render thread
- * 4. Previous mask shown between inferences
+ * ARCHITECTURE:
+ * - CameraManager: CameraX preview and frame extraction
+ * - TFLiteModel: Unified TensorFlow Lite inference (detection + segmentation)
+ * - OverlayRenderer: Draws boxes or masks on SurfaceView
+ *
+ * THREADING:
+ * - UI Thread: Updates UI, handles input
+ * - Camera Analysis Thread: Extracts frames (never blocked)
+ * - Inference Thread: Runs TFLite model
+ * - Render Thread: Draws overlay (SurfaceView)
  */
 class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
 
     companion object {
         private const val TAG = "MainActivity"
-        private const val FPS_WINDOW_SIZE = 30  // Rolling window for FPS average
+        private const val FPS_WINDOW_SIZE = 30
+
+        // Model configuration
+        private const val MODEL_FILE = "rf_detr_segmentation.tflite"
     }
 
     // View binding
@@ -58,26 +61,32 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
 
     // Core components
     private lateinit var cameraManager: CameraManager
-    private lateinit var segmentationModel: TFLiteSegmentationModel
-    private lateinit var renderer: SegmentationRenderer
+    private lateinit var model: TFLiteModel
+    private lateinit var renderer: OverlayRenderer
 
-    // Inference executor - dedicated thread for ML inference
+    // Inference executor
     private lateinit var inferenceExecutor: ExecutorService
 
-    // Coroutine scope for async operations
+    // Coroutine scope
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // Model initialization state
+    // State
     private val modelReady = AtomicBoolean(false)
 
-    // FPS tracking with rolling average
+    // FPS tracking
     private val cameraFpsWindow = LinkedList<Float>()
     private val inferenceFpsWindow = LinkedList<Float>()
-    private var lastInferenceTime = 0L
 
     // Current settings
     private var currentFrameSkip = 2
-    private var currentDelegate = TFLiteSegmentationModel.DelegateType.GPU
+    private var currentDelegate = TFLiteModel.DelegateType.GPU
+
+    // Class labels (configure based on your model)
+    private val classLabels = listOf(
+        "Background",
+        "Defect",
+        // Add more labels as needed
+    )
 
     // Permission launcher
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -94,26 +103,17 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Setup edge-to-edge display
         setupFullscreen()
 
-        // Initialize view binding
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Keep screen on during segmentation
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Setup UI controls
         setupControls()
-
-        // Check and request camera permission
         checkCameraPermission()
     }
 
-    /**
-     * Setup fullscreen immersive mode.
-     */
     private fun setupFullscreen() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).let { controller ->
@@ -123,9 +123,6 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         }
     }
 
-    /**
-     * Setup UI control buttons.
-     */
     private fun setupControls() {
         // Frame skip buttons
         binding.btnFrameN1.setOnClickListener { setFrameSkip(1) }
@@ -133,18 +130,14 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         binding.btnFrameN3.setOnClickListener { setFrameSkip(3) }
 
         // Delegate buttons
-        binding.btnGpu.setOnClickListener { switchDelegate(TFLiteSegmentationModel.DelegateType.GPU) }
-        binding.btnNnapi.setOnClickListener { switchDelegate(TFLiteSegmentationModel.DelegateType.NNAPI) }
-        binding.btnCpu.setOnClickListener { switchDelegate(TFLiteSegmentationModel.DelegateType.CPU) }
+        binding.btnGpu.setOnClickListener { switchDelegate(TFLiteModel.DelegateType.GPU) }
+        binding.btnNnapi.setOnClickListener { switchDelegate(TFLiteModel.DelegateType.NNAPI) }
+        binding.btnCpu.setOnClickListener { switchDelegate(TFLiteModel.DelegateType.CPU) }
 
-        // Set initial button states
         updateFrameSkipButtons()
         updateDelegateButtons()
     }
 
-    /**
-     * Set frame skip value and update UI.
-     */
     private fun setFrameSkip(n: Int) {
         currentFrameSkip = n
         if (::cameraManager.isInitialized) {
@@ -154,68 +147,52 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         Log.i(TAG, "Frame skip set to $n")
     }
 
-    /**
-     * Update frame skip button visual states.
-     */
     private fun updateFrameSkipButtons() {
         binding.btnFrameN1.alpha = if (currentFrameSkip == 1) 1.0f else 0.5f
         binding.btnFrameN2.alpha = if (currentFrameSkip == 2) 1.0f else 0.5f
         binding.btnFrameN3.alpha = if (currentFrameSkip == 3) 1.0f else 0.5f
     }
 
-    /**
-     * Switch to a different TFLite delegate.
-     */
-    private fun switchDelegate(delegate: TFLiteSegmentationModel.DelegateType) {
+    private fun switchDelegate(delegate: TFLiteModel.DelegateType) {
         if (!modelReady.get()) return
         if (currentDelegate == delegate) return
 
         modelReady.set(false)
-        updateDelegateDisplay("Switching...")
+        updateStatusDisplay("Switching...")
 
         mainScope.launch {
             try {
                 val actualDelegate = withContext(Dispatchers.Default) {
-                    segmentationModel.initialize(delegate)
+                    model.initialize(MODEL_FILE, delegate)
                 }
                 currentDelegate = actualDelegate
                 modelReady.set(true)
                 updateDelegateButtons()
-                updateDelegateDisplay(actualDelegate.name)
+                updateStatusDisplay("${model.resolvedModelType.name} | ${actualDelegate.name}")
                 Log.i(TAG, "Switched to $actualDelegate delegate")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to switch delegate: ${e.message}", e)
                 Toast.makeText(this@MainActivity, "Failed to switch delegate", Toast.LENGTH_SHORT).show()
-                updateDelegateDisplay(currentDelegate.name)
+                updateStatusDisplay("Error")
                 modelReady.set(true)
             }
         }
     }
 
-    /**
-     * Update delegate button visual states.
-     */
     private fun updateDelegateButtons() {
-        binding.btnGpu.alpha = if (currentDelegate == TFLiteSegmentationModel.DelegateType.GPU) 1.0f else 0.5f
-        binding.btnNnapi.alpha = if (currentDelegate == TFLiteSegmentationModel.DelegateType.NNAPI) 1.0f else 0.5f
-        binding.btnCpu.alpha = if (currentDelegate == TFLiteSegmentationModel.DelegateType.CPU) 1.0f else 0.5f
+        binding.btnGpu.alpha = if (currentDelegate == TFLiteModel.DelegateType.GPU) 1.0f else 0.5f
+        binding.btnNnapi.alpha = if (currentDelegate == TFLiteModel.DelegateType.NNAPI) 1.0f else 0.5f
+        binding.btnCpu.alpha = if (currentDelegate == TFLiteModel.DelegateType.CPU) 1.0f else 0.5f
     }
 
-    /**
-     * Update delegate display text.
-     */
-    private fun updateDelegateDisplay(text: String) {
+    private fun updateStatusDisplay(text: String) {
         binding.delegateTextView.text = text
     }
 
-    /**
-     * Check camera permission and request if needed.
-     */
     private fun checkCameraPermission() {
         when {
             ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.CAMERA
+                this, Manifest.permission.CAMERA
             ) == PackageManager.PERMISSION_GRANTED -> {
                 initializeComponents()
             }
@@ -229,61 +206,63 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         }
     }
 
-    /**
-     * Initialize all components after permission is granted.
-     */
     private fun initializeComponents() {
         Log.i(TAG, "Initializing components")
 
-        // Initialize inference executor
+        // Inference executor
         inferenceExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "InferenceThread").apply {
                 priority = Thread.MAX_PRIORITY
             }
         }
 
-        // Initialize segmentation model
-        segmentationModel = TFLiteSegmentationModel(this)
-
-        // Initialize renderer
-        renderer = SegmentationRenderer(binding.overlayView)
-        renderer.maskAlpha = 0.4f
-
-        // Initialize camera manager
-        cameraManager = CameraManager(this, this, binding.previewView)
-        cameraManager.setFrameCallback(this)
-        cameraManager.setFrameSkip(currentFrameSkip)
-
-        // Setup FPS callback
-        cameraManager.setFpsCallback { fps ->
-            addCameraFps(fps)
+        // Model
+        model = TFLiteModel(this).apply {
+            classLabels = this@MainActivity.classLabels
+            confidenceThreshold = 0.1f  // Low threshold for debugging
+            boxFormat = TFLiteModel.BoxFormat.CXCYWH  // RF-DETR uses center format
+            useImageNetNormalization = true  // RF-DETR requires ImageNet normalization
         }
 
-        // Initialize model async and start camera when ready
+        // Renderer
+        renderer = OverlayRenderer(binding.overlayView).apply {
+            maskAlpha = 0.4f
+            boxStrokeWidth = 6f
+            labelTextSize = 40f
+            showLabels = true
+            showConfidence = true
+        }
+
+        // Camera
+        cameraManager = CameraManager(this, this, binding.previewView).apply {
+            setFrameCallback(this@MainActivity)
+            setFrameSkip(currentFrameSkip)
+            setFpsCallback { fps -> addCameraFps(fps) }
+        }
+
         initializeModel()
     }
 
-    /**
-     * Initialize TFLite model on background thread.
-     */
     private fun initializeModel() {
-        updateDelegateDisplay("Loading...")
+        updateStatusDisplay("Loading...")
 
         mainScope.launch {
             try {
                 val actualDelegate = withContext(Dispatchers.Default) {
-                    segmentationModel.initialize(currentDelegate)
+                    model.initialize(MODEL_FILE, currentDelegate)
                 }
 
                 currentDelegate = actualDelegate
                 modelReady.set(true)
                 updateDelegateButtons()
-                updateDelegateDisplay(actualDelegate.name)
 
-                Log.i(TAG, "Model initialized with ${actualDelegate.name} delegate")
-                Log.i(TAG, "Model input size: ${segmentationModel.inputWidth}x${segmentationModel.inputHeight}")
+                val modelTypeStr = model.resolvedModelType.name
+                updateStatusDisplay("$modelTypeStr | ${actualDelegate.name}")
 
-                // Start camera after model is ready
+                Log.i(TAG, "Model initialized: $modelTypeStr with $actualDelegate")
+                Log.i(TAG, "Input size: ${model.inputWidth}x${model.inputHeight}")
+
+                // Start camera
                 cameraManager.start()
 
             } catch (e: Exception) {
@@ -291,18 +270,17 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
                         this@MainActivity,
-                        "Failed to load model. Please ensure rf_detr_segmentation.tflite is in assets.",
+                        "Failed to load model. Ensure $MODEL_FILE is in assets.",
                         Toast.LENGTH_LONG
                     ).show()
-                    updateDelegateDisplay("Error")
+                    updateStatusDisplay("Error: Model not found")
                 }
             }
         }
     }
 
     /**
-     * CameraManager.FrameCallback - called when frame is ready for analysis.
-     * This runs on the camera analysis thread.
+     * CameraManager.FrameCallback - called on camera analysis thread.
      */
     override fun onFrameAvailable(bitmap: Bitmap, rotationDegrees: Int) {
         if (!modelReady.get()) {
@@ -310,34 +288,42 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
             return
         }
 
-        // Submit inference to dedicated executor
         inferenceExecutor.execute {
             try {
                 val inferenceStart = System.currentTimeMillis()
 
-                // Run segmentation
-                val result = segmentationModel.runInference(bitmap)
+                // Run unified inference
+                val result = model.runInference(bitmap)
 
-                if (result != null) {
-                    // Update renderer with new mask
-                    renderer.updateMask(result)
+                when (result) {
+                    is TFLiteModel.InferenceResult.Detections -> {
+                        renderer.updateDetections(result.result.detections)
 
-                    // Track inference FPS
-                    val inferenceTime = System.currentTimeMillis() - inferenceStart
-                    val inferenceFps = 1000f / inferenceTime.coerceAtLeast(1)
-                    addInferenceFps(inferenceFps)
-
-                    // Update FPS display
-                    updateFpsDisplay()
+                        // Log detection count periodically
+                        if (result.result.detections.isNotEmpty()) {
+                            Log.v(TAG, "Detected ${result.result.detections.size} objects")
+                        }
+                    }
+                    is TFLiteModel.InferenceResult.Segmentation -> {
+                        renderer.updateMask(result.result)
+                    }
+                    null -> {
+                        Log.w(TAG, "Inference returned null")
+                    }
                 }
+
+                // Track inference FPS
+                val inferenceTime = System.currentTimeMillis() - inferenceStart
+                val inferenceFps = 1000f / inferenceTime.coerceAtLeast(1)
+                addInferenceFps(inferenceFps)
+
+                updateFpsDisplay()
 
             } catch (e: Exception) {
                 Log.e(TAG, "Inference error: ${e.message}", e)
             } finally {
-                // Always signal completion to allow next frame
                 cameraManager.onInferenceComplete()
 
-                // Recycle the bitmap after inference
                 if (!bitmap.isRecycled) {
                     bitmap.recycle()
                 }
@@ -345,17 +331,10 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         }
     }
 
-    /**
-     * CameraManager.FrameCallback - called when frame is skipped.
-     */
     override fun onFrameSkipped() {
-        // Frame was skipped due to frame skip setting
-        // Previous mask continues to be displayed
+        // Previous result continues to be displayed
     }
 
-    /**
-     * Add camera FPS sample to rolling window.
-     */
     @Synchronized
     private fun addCameraFps(fps: Float) {
         cameraFpsWindow.addLast(fps)
@@ -364,9 +343,6 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         }
     }
 
-    /**
-     * Add inference FPS sample to rolling window.
-     */
     @Synchronized
     private fun addInferenceFps(fps: Float) {
         inferenceFpsWindow.addLast(fps)
@@ -375,9 +351,6 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         }
     }
 
-    /**
-     * Calculate rolling average FPS.
-     */
     @Synchronized
     private fun getAverageFps(): Pair<Float, Float> {
         val cameraAvg = if (cameraFpsWindow.isNotEmpty()) {
@@ -391,9 +364,6 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         return Pair(cameraAvg, inferenceAvg)
     }
 
-    /**
-     * Update FPS display on UI thread.
-     */
     private fun updateFpsDisplay() {
         val (cameraFps, inferenceFps) = getAverageFps()
 
@@ -408,7 +378,6 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
 
     override fun onResume() {
         super.onResume()
-        // Restart camera if it was stopped
         if (::cameraManager.isInitialized && modelReady.get() && !cameraManager.isRunning()) {
             cameraManager.start()
         }
@@ -416,7 +385,6 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
 
     override fun onPause() {
         super.onPause()
-        // Stop camera to save battery
         if (::cameraManager.isInitialized) {
             cameraManager.stop()
         }
@@ -425,10 +393,8 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
     override fun onDestroy() {
         super.onDestroy()
 
-        // Cancel coroutines
         mainScope.cancel()
 
-        // Shutdown components
         if (::cameraManager.isInitialized) {
             cameraManager.shutdown()
         }
@@ -441,8 +407,8 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
             renderer.release()
         }
 
-        if (::segmentationModel.isInitialized) {
-            segmentationModel.close()
+        if (::model.isInitialized) {
+            model.close()
         }
     }
 }

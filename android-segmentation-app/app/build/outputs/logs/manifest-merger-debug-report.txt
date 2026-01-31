@@ -58,6 +58,7 @@ MERGED from [org.tensorflow:tensorflow-lite-support:0.4.4] /home/lukas-oster/.gr
 MERGED from [org.tensorflow:tensorflow-lite:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/9acc052f1c70f2988d0d4939ceeff0fd/transformed/tensorflow-lite-2.13.0/AndroidManifest.xml:2:1-11:12
 MERGED from [org.tensorflow:tensorflow-lite-gpu:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/4bea6bc9c3d021cfff574b7189aca6fe/transformed/tensorflow-lite-gpu-2.13.0/AndroidManifest.xml:2:1-11:12
 MERGED from [org.tensorflow:tensorflow-lite-gpu-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/ed0c2e8f93cdb532c38d99e32833c3bb/transformed/tensorflow-lite-gpu-api-2.13.0/AndroidManifest.xml:2:1-21:12
+MERGED from [org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/5c946bba7c10466d968ae727534bed1d/transformed/tensorflow-lite-select-tf-ops-2.13.0/AndroidManifest.xml:2:1-8:12
 MERGED from [org.tensorflow:tensorflow-lite-support-api:0.4.4] /home/lukas-oster/.gradle/caches/8.13/transforms/e8cf3e88cf5060e4ccd9f6cb1708214c/transformed/tensorflow-lite-support-api-0.4.4/AndroidManifest.xml:2:1-5:12
 MERGED from [org.tensorflow:tensorflow-lite-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/9ac351870edc89c13b6330ea0f051444/transformed/tensorflow-lite-api-2.13.0/AndroidManifest.xml:2:1-11:12
 MERGED from [com.google.android.odml:image:1.0.0-beta1] /home/lukas-oster/.gradle/caches/8.13/transforms/a707c3d61d6fb826b18c16c4d789c051/transformed/image-1.0.0-beta1/AndroidManifest.xml:2:1-9:12
@@ -114,6 +115,8 @@ MERGED from [org.tensorflow:tensorflow-lite-gpu:2.13.0] /home/lukas-oster/.gradl
 MERGED from [org.tensorflow:tensorflow-lite-gpu:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/4bea6bc9c3d021cfff574b7189aca6fe/transformed/tensorflow-lite-gpu-2.13.0/AndroidManifest.xml:9:5-20
 MERGED from [org.tensorflow:tensorflow-lite-gpu-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/ed0c2e8f93cdb532c38d99e32833c3bb/transformed/tensorflow-lite-gpu-api-2.13.0/AndroidManifest.xml:5:5-19:19
 MERGED from [org.tensorflow:tensorflow-lite-gpu-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/ed0c2e8f93cdb532c38d99e32833c3bb/transformed/tensorflow-lite-gpu-api-2.13.0/AndroidManifest.xml:5:5-19:19
+MERGED from [org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/5c946bba7c10466d968ae727534bed1d/transformed/tensorflow-lite-select-tf-ops-2.13.0/AndroidManifest.xml:6:5-20
+MERGED from [org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/5c946bba7c10466d968ae727534bed1d/transformed/tensorflow-lite-select-tf-ops-2.13.0/AndroidManifest.xml:6:5-20
 MERGED from [org.tensorflow:tensorflow-lite-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/9ac351870edc89c13b6330ea0f051444/transformed/tensorflow-lite-api-2.13.0/AndroidManifest.xml:9:5-20
 MERGED from [org.tensorflow:tensorflow-lite-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/9ac351870edc89c13b6330ea0f051444/transformed/tensorflow-lite-api-2.13.0/AndroidManifest.xml:9:5-20
 MERGED from [com.google.android.odml:image:1.0.0-beta1] /home/lukas-oster/.gradle/caches/8.13/transforms/a707c3d61d6fb826b18c16c4d789c051/transformed/image-1.0.0-beta1/AndroidManifest.xml:7:5-20
@@ -266,6 +269,8 @@ MERGED from [org.tensorflow:tensorflow-lite:2.13.0] /home/lukas-oster/.gradle/ca
 MERGED from [org.tensorflow:tensorflow-lite:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/9acc052f1c70f2988d0d4939ceeff0fd/transformed/tensorflow-lite-2.13.0/AndroidManifest.xml:6:5-7:38
 MERGED from [org.tensorflow:tensorflow-lite-gpu:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/4bea6bc9c3d021cfff574b7189aca6fe/transformed/tensorflow-lite-gpu-2.13.0/AndroidManifest.xml:6:5-7:38
 MERGED from [org.tensorflow:tensorflow-lite-gpu:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/4bea6bc9c3d021cfff574b7189aca6fe/transformed/tensorflow-lite-gpu-2.13.0/AndroidManifest.xml:6:5-7:38
+MERGED from [org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/5c946bba7c10466d968ae727534bed1d/transformed/tensorflow-lite-select-tf-ops-2.13.0/AndroidManifest.xml:4:5-44
+MERGED from [org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/5c946bba7c10466d968ae727534bed1d/transformed/tensorflow-lite-select-tf-ops-2.13.0/AndroidManifest.xml:4:5-44
 MERGED from [org.tensorflow:tensorflow-lite-support-api:0.4.4] /home/lukas-oster/.gradle/caches/8.13/transforms/e8cf3e88cf5060e4ccd9f6cb1708214c/transformed/tensorflow-lite-support-api-0.4.4/AndroidManifest.xml:4:3-71
 MERGED from [org.tensorflow:tensorflow-lite-support-api:0.4.4] /home/lukas-oster/.gradle/caches/8.13/transforms/e8cf3e88cf5060e4ccd9f6cb1708214c/transformed/tensorflow-lite-support-api-0.4.4/AndroidManifest.xml:4:3-71
 MERGED from [org.tensorflow:tensorflow-lite-api:2.13.0] /home/lukas-oster/.gradle/caches/8.13/transforms/9ac351870edc89c13b6330ea0f051444/transformed/tensorflow-lite-api-2.13.0/AndroidManifest.xml:6:5-7:38

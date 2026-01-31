@@ -48,7 +48,7 @@
 33        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
 33-->[androidx.core:core:1.12.0] /home/lukas-oster/.gradle/caches/8.13/transforms/077df947e625d0ec6927222820de6f71/transformed/core-1.12.0/AndroidManifest.xml:28:18-86
 34        android:debuggable="true"
-35        android:extractNativeLibs="false"
+35        android:extractNativeLibs="true"
 36        android:hardwareAccelerated="true"
 36-->/home/lukas-oster/Desktop/pa-ai-streamer/android-segmentation-app/app/src/main/AndroidManifest.xml:22:9-43
 37        android:icon="@mipmap/ic_launcher"

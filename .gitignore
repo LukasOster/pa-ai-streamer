@@ -1,0 +1,11 @@
+rf_detr_504x504_wrapped.onnx
+model-export
+android-segmentation-app/app/build
+pa-ai-streamer/android-segmentation-app/app/build
+pa-ai-streamer/android-segmentation-app/app/build/intermediates/apk
+pa-ai-streamer/android-segmentation-app/app/src/main/assets/rf_detr_segmentation.tflite
+pa-ai-streamer/android-segmentation-app/app/build/intermediates/apk/debug/app-debug.apk
+
+android-segmentation-app/app/build/intermediates/apk/debug/app-debug.apk
+android-segmentation-app/app/src/main/assets/rf_detr_segmentation.tflite
+android-segmentation-app/app/build/intermediates/apk
