@@ -9,3 +9,5 @@ pa-ai-streamer/android-segmentation-app/app/build/intermediates/apk/debug/app-de
 android-segmentation-app/app/build/intermediates/apk/debug/app-debug.apk
 android-segmentation-app/app/src/main/assets/rf_detr_segmentation.tflite
 android-segmentation-app/app/build/intermediates/apk
+android-segmentation-app/app/src/main/java/com/segmentation/app/
+android-segmentation-app/app/src/main/assets/rf_detr_detection.onnx

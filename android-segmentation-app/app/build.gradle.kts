@@ -40,14 +40,16 @@ android {
         viewBinding = true
     }
 
-    // Disable compression for TFLite models to allow memory mapping
+    // Disable compression for models to allow memory mapping
     androidResources {
         noCompress += "tflite"
+        noCompress += "onnx"
     }
 
     // Required for large model files
     aaptOptions {
         noCompress("tflite")
+        noCompress("onnx")
     }
 
     packaging {
@@ -79,6 +81,9 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     // Required for models with TensorFlow Select ops (like FlexErf)
     implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.13.0")
+
+    // ONNX Runtime for alternative model inference
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.16.3")
 
     // Coroutines for async processing
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

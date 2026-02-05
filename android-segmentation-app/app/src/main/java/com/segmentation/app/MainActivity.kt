@@ -53,7 +53,11 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         private const val FPS_WINDOW_SIZE = 30
 
         // Model configuration
-        private const val MODEL_FILE = "rf_detr_segmentation.tflite"
+        private const val TFLITE_MODEL_FILE = "rf_detr_segmentation.tflite"
+        private const val ONNX_MODEL_FILE = "rf_detr_detection.onnx"
+
+        // Use ONNX Runtime (has working box outputs)
+        private const val USE_ONNX = true
     }
 
     // View binding
@@ -61,7 +65,8 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
 
     // Core components
     private lateinit var cameraManager: CameraManager
-    private lateinit var model: TFLiteModel
+    private lateinit var tfliteModel: TFLiteModel
+    private var onnxModel: ONNXModel? = null
     private lateinit var renderer: OverlayRenderer
 
     // Inference executor
@@ -81,12 +86,31 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
     private var currentFrameSkip = 2
     private var currentDelegate = TFLiteModel.DelegateType.GPU
 
-    // Class labels (configure based on your model)
-    private val classLabels = listOf(
-        "Background",
-        "Defect",
-        // Add more labels as needed
+    // COCO class labels using ORIGINAL COCO IDs (with gaps)
+    // RF-DETR outputs these original IDs, not continuous 0-90
+    private val cocoClassMap = mapOf(
+        0 to "Background",
+        1 to "Person", 2 to "Bicycle", 3 to "Car", 4 to "Motorcycle", 5 to "Airplane",
+        6 to "Bus", 7 to "Train", 8 to "Truck", 9 to "Boat", 10 to "Traffic Light",
+        11 to "Fire Hydrant", 13 to "Stop Sign", 14 to "Parking Meter", 15 to "Bench",
+        16 to "Bird", 17 to "Cat", 18 to "Dog", 19 to "Horse", 20 to "Sheep",
+        21 to "Cow", 22 to "Elephant", 23 to "Bear", 24 to "Zebra", 25 to "Giraffe",
+        27 to "Backpack", 28 to "Umbrella", 31 to "Handbag", 32 to "Tie", 33 to "Suitcase",
+        34 to "Frisbee", 35 to "Skis", 36 to "Snowboard", 37 to "Sports Ball", 38 to "Kite",
+        39 to "Baseball Bat", 40 to "Baseball Glove", 41 to "Skateboard", 42 to "Surfboard",
+        43 to "Tennis Racket", 44 to "Bottle", 46 to "Wine Glass", 47 to "Cup", 48 to "Fork",
+        49 to "Knife", 50 to "Spoon", 51 to "Bowl", 52 to "Banana", 53 to "Apple",
+        54 to "Sandwich", 55 to "Orange", 56 to "Broccoli", 57 to "Carrot", 58 to "Hot Dog",
+        59 to "Pizza", 60 to "Donut", 61 to "Cake", 62 to "Chair", 63 to "Couch",
+        64 to "Potted Plant", 65 to "Bed", 67 to "Dining Table", 70 to "Toilet", 72 to "TV",
+        73 to "Laptop", 74 to "Mouse", 75 to "Remote", 76 to "Keyboard", 77 to "Cell Phone",
+        78 to "Microwave", 79 to "Oven", 80 to "Toaster", 81 to "Sink", 82 to "Refrigerator",
+        84 to "Book", 85 to "Clock", 86 to "Vase", 87 to "Scissors", 88 to "Teddy Bear",
+        89 to "Hair Drier", 90 to "Toothbrush"
     )
+
+    // Convert map to list for ONNXModel (it uses list index for label lookup)
+    private val classLabels = (0..90).map { cocoClassMap[it] ?: "Class $it" }
 
     // Permission launcher
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -101,17 +125,32 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.i(TAG, "=== onCreate START ===")
         super.onCreate(savedInstanceState)
 
-        setupFullscreen()
+        try {
+            Log.d(TAG, "Setting up fullscreen...")
+            setupFullscreen()
 
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+            Log.d(TAG, "Inflating layout...")
+            binding = ActivityMainBinding.inflate(layoutInflater)
+            setContentView(binding.root)
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Log.d(TAG, "Setting window flags...")
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        setupControls()
-        checkCameraPermission()
+            Log.d(TAG, "Setting up controls...")
+            setupControls()
+
+            Log.d(TAG, "Checking camera permission...")
+            checkCameraPermission()
+
+            Log.i(TAG, "=== onCreate COMPLETE ===")
+        } catch (e: Exception) {
+            Log.e(TAG, "=== onCreate FAILED ===")
+            Log.e(TAG, "Error: ${e.message}", e)
+            throw e
+        }
     }
 
     private fun setupFullscreen() {
@@ -154,6 +193,12 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
     }
 
     private fun switchDelegate(delegate: TFLiteModel.DelegateType) {
+        // Delegate switching only applies to TFLite mode
+        if (USE_ONNX) {
+            Toast.makeText(this, "Delegate switching not available in ONNX mode", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         if (!modelReady.get()) return
         if (currentDelegate == delegate) return
 
@@ -163,12 +208,12 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
         mainScope.launch {
             try {
                 val actualDelegate = withContext(Dispatchers.Default) {
-                    model.initialize(MODEL_FILE, delegate)
+                    tfliteModel.initialize(TFLITE_MODEL_FILE, delegate)
                 }
                 currentDelegate = actualDelegate
                 modelReady.set(true)
                 updateDelegateButtons()
-                updateStatusDisplay("${model.resolvedModelType.name} | ${actualDelegate.name}")
+                updateStatusDisplay("${tfliteModel.resolvedModelType.name} | ${actualDelegate.name}")
                 Log.i(TAG, "Switched to $actualDelegate delegate")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to switch delegate: ${e.message}", e)
@@ -207,73 +252,115 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
     }
 
     private fun initializeComponents() {
-        Log.i(TAG, "Initializing components")
+        Log.i(TAG, "=== initializeComponents START ===")
+        Log.i(TAG, "USE_ONNX = $USE_ONNX")
 
-        // Inference executor
-        inferenceExecutor = Executors.newSingleThreadExecutor { r ->
-            Thread(r, "InferenceThread").apply {
-                priority = Thread.MAX_PRIORITY
+        try {
+            // Inference executor
+            Log.d(TAG, "Creating inference executor...")
+            inferenceExecutor = Executors.newSingleThreadExecutor { r ->
+                Thread(r, "InferenceThread").apply {
+                    priority = Thread.MAX_PRIORITY
+                }
             }
-        }
+            Log.d(TAG, "Inference executor created")
 
-        // Model
-        model = TFLiteModel(this).apply {
-            classLabels = this@MainActivity.classLabels
-            confidenceThreshold = 0.1f  // Low threshold for debugging
-            boxFormat = TFLiteModel.BoxFormat.CXCYWH  // RF-DETR uses center format
-            useImageNetNormalization = true  // RF-DETR requires ImageNet normalization
-        }
+            // Model - use ONNX or TFLite based on configuration
+            Log.d(TAG, "Creating model wrapper...")
+            if (USE_ONNX) {
+                Log.d(TAG, "Creating ONNXModel...")
+                onnxModel = ONNXModel(this).apply {
+                    classLabels = this@MainActivity.classLabels
+                    confidenceThreshold = 0.1f
+                }
+                Log.d(TAG, "ONNXModel created")
+            } else {
+                Log.d(TAG, "Creating TFLiteModel...")
+                tfliteModel = TFLiteModel(this).apply {
+                    classLabels = this@MainActivity.classLabels
+                    confidenceThreshold = 0.1f
+                    boxFormat = TFLiteModel.BoxFormat.CXCYWH
+                    useImageNetNormalization = true
+                }
+                Log.d(TAG, "TFLiteModel created")
+            }
 
-        // Renderer
-        renderer = OverlayRenderer(binding.overlayView).apply {
-            maskAlpha = 0.4f
-            boxStrokeWidth = 6f
-            labelTextSize = 40f
-            showLabels = true
-            showConfidence = true
-        }
+            // Renderer
+            Log.d(TAG, "Creating renderer...")
+            renderer = OverlayRenderer(binding.overlayView).apply {
+                maskAlpha = 0.4f
+                boxStrokeWidth = 6f
+                labelTextSize = 40f
+                showLabels = true
+                showConfidence = true
+            }
+            Log.d(TAG, "Renderer created")
 
-        // Camera
-        cameraManager = CameraManager(this, this, binding.previewView).apply {
-            setFrameCallback(this@MainActivity)
-            setFrameSkip(currentFrameSkip)
-            setFpsCallback { fps -> addCameraFps(fps) }
-        }
+            // Camera
+            Log.d(TAG, "Creating camera manager...")
+            cameraManager = CameraManager(this, this, binding.previewView).apply {
+                setFrameCallback(this@MainActivity)
+                setFrameSkip(currentFrameSkip)
+                setFpsCallback { fps -> addCameraFps(fps) }
+            }
+            Log.d(TAG, "Camera manager created")
 
-        initializeModel()
+            Log.i(TAG, "=== initializeComponents COMPLETE ===")
+            initializeModel()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "=== initializeComponents FAILED ===")
+            Log.e(TAG, "Error: ${e.message}", e)
+            throw e
+        }
     }
 
     private fun initializeModel() {
+        Log.i(TAG, "=== initializeModel START ===")
         updateStatusDisplay("Loading...")
 
         mainScope.launch {
             try {
-                val actualDelegate = withContext(Dispatchers.Default) {
-                    model.initialize(MODEL_FILE, currentDelegate)
+                if (USE_ONNX) {
+                    Log.d(TAG, "Initializing ONNX model: $ONNX_MODEL_FILE")
+                    withContext(Dispatchers.Default) {
+                        onnxModel?.initialize(ONNX_MODEL_FILE)
+                    }
+                    Log.d(TAG, "ONNX model initialized, setting modelReady=true")
+                    modelReady.set(true)
+                    updateStatusDisplay("ONNX | DETECTION")
+                    Log.i(TAG, "ONNX model ready")
+                    Log.i(TAG, "Input size: ${onnxModel?.inputWidth}x${onnxModel?.inputHeight}")
+                } else {
+                    Log.d(TAG, "Initializing TFLite model: $TFLITE_MODEL_FILE")
+                    val actualDelegate = withContext(Dispatchers.Default) {
+                        tfliteModel.initialize(TFLITE_MODEL_FILE, currentDelegate)
+                    }
+                    currentDelegate = actualDelegate
+                    modelReady.set(true)
+                    updateDelegateButtons()
+                    val modelTypeStr = tfliteModel.resolvedModelType.name
+                    updateStatusDisplay("$modelTypeStr | ${actualDelegate.name}")
+                    Log.i(TAG, "TFLite model initialized: $modelTypeStr with $actualDelegate")
+                    Log.i(TAG, "Input size: ${tfliteModel.inputWidth}x${tfliteModel.inputHeight}")
                 }
 
-                currentDelegate = actualDelegate
-                modelReady.set(true)
-                updateDelegateButtons()
-
-                val modelTypeStr = model.resolvedModelType.name
-                updateStatusDisplay("$modelTypeStr | ${actualDelegate.name}")
-
-                Log.i(TAG, "Model initialized: $modelTypeStr with $actualDelegate")
-                Log.i(TAG, "Input size: ${model.inputWidth}x${model.inputHeight}")
-
                 // Start camera
+                Log.d(TAG, "Starting camera...")
                 cameraManager.start()
+                Log.i(TAG, "=== initializeModel COMPLETE ===")
 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize model: ${e.message}", e)
+                Log.e(TAG, "=== initializeModel FAILED ===")
+                Log.e(TAG, "Error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
+                    val modelFile = if (USE_ONNX) ONNX_MODEL_FILE else TFLITE_MODEL_FILE
                     Toast.makeText(
                         this@MainActivity,
-                        "Failed to load model. Ensure $MODEL_FILE is in assets.",
+                        "Failed to load model: ${e.message}",
                         Toast.LENGTH_LONG
                     ).show()
-                    updateStatusDisplay("Error: Model not found")
+                    updateStatusDisplay("Error: ${e.message}")
                 }
             }
         }
@@ -292,23 +379,37 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
             try {
                 val inferenceStart = System.currentTimeMillis()
 
-                // Run unified inference
-                val result = model.runInference(bitmap)
-
-                when (result) {
-                    is TFLiteModel.InferenceResult.Detections -> {
-                        renderer.updateDetections(result.result.detections)
-
-                        // Log detection count periodically
-                        if (result.result.detections.isNotEmpty()) {
-                            Log.v(TAG, "Detected ${result.result.detections.size} objects")
+                if (USE_ONNX) {
+                    // Run ONNX inference
+                    val result = onnxModel?.runInference(bitmap)
+                    if (result != null) {
+                        renderer.updateDetections(result.detections)
+                        if (result.detections.isNotEmpty()) {
+                            Log.d(TAG, "ONNX detected ${result.detections.size} objects")
+                            result.detections.forEach { det ->
+                                Log.d(TAG, "  ${det.label}: ${det.confidence} @ ${det.boundingBox}")
+                            }
                         }
                     }
-                    is TFLiteModel.InferenceResult.Segmentation -> {
-                        renderer.updateMask(result.result)
-                    }
-                    null -> {
-                        Log.w(TAG, "Inference returned null")
+                } else {
+                    // Run TFLite inference
+                    val result = tfliteModel.runInference(bitmap)
+
+                    when (result) {
+                        is TFLiteModel.InferenceResult.Detections -> {
+                            renderer.updateDetections(result.result.detections)
+
+                            // Log detection count periodically
+                            if (result.result.detections.isNotEmpty()) {
+                                Log.v(TAG, "Detected ${result.result.detections.size} objects")
+                            }
+                        }
+                        is TFLiteModel.InferenceResult.Segmentation -> {
+                            renderer.updateMask(result.result)
+                        }
+                        null -> {
+                            Log.w(TAG, "Inference returned null")
+                        }
                     }
                 }
 
@@ -321,11 +422,19 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Inference error: ${e.message}", e)
+                e.printStackTrace()
+            } catch (t: Throwable) {
+                Log.e(TAG, "Inference throwable: ${t.message}", t)
+                t.printStackTrace()
             } finally {
                 cameraManager.onInferenceComplete()
 
-                if (!bitmap.isRecycled) {
-                    bitmap.recycle()
+                try {
+                    if (!bitmap.isRecycled) {
+                        bitmap.recycle()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error recycling bitmap: ${e.message}")
                 }
             }
         }
@@ -407,8 +516,10 @@ class MainActivity : AppCompatActivity(), CameraManager.FrameCallback {
             renderer.release()
         }
 
-        if (::model.isInitialized) {
-            model.close()
+        onnxModel?.close()
+
+        if (::tfliteModel.isInitialized) {
+            tfliteModel.close()
         }
     }
 }

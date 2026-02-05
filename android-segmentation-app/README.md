@@ -1,216 +1,333 @@
-# Real-Time ML Inference Android App
+# Real-Time RF-DETR Object Detection Android App
 
-Android-App für Echtzeit-ML-Inferenz mit TensorFlow Lite auf dem Live-Kamera-Stream.
-
-**Unterstützt beide Modi:**
-- **Object Detection** - Bounding Boxes mit Labels
-- **Semantic Segmentation** - Pixel-weise Klassenmasken
-
-Der Modus wird automatisch basierend auf dem Output-Tensor-Shape erkannt.
+Android application for real-time object detection using RF-DETR with ONNX Runtime inference on live camera stream.
 
 ## Features
 
-- Live-Kamera-Preview mit CameraX
-- TensorFlow Lite Inference mit Hardware-Beschleunigung (GPU/NNAPI/CPU)
-- **Object Detection**: Farbige Bounding Boxes mit Klassen-Labels und Konfidenz
-- **Segmentation**: Halbtransparentes farbiges Overlay
-- Frame-Skipping für optimale Performance (N=1/2/3)
-- Rolling-Average FPS-Counter
-- Umschaltbare Delegates zur Laufzeit
+- Real-time camera preview with CameraX
+- **ONNX Runtime** inference (preferred for RF-DETR)
+- Alternative TFLite inference support
+- Configurable frame skipping for performance (N=1/2/3)
+- Rolling-average FPS counter
+- Hardware acceleration support
 
-## Projektstruktur
-
-```
-app/src/main/java/com/segmentation/app/
-├── MainActivity.kt      # Haupt-Activity, koordiniert alle Komponenten
-├── CameraManager.kt     # CameraX Setup, Frame-Extraktion, Threading
-├── TFLiteModel.kt       # Unified TFLite Inference (Detection + Segmentation)
-└── OverlayRenderer.kt   # Rendert Boxes ODER Masken auf SurfaceView
-```
-
-## Setup
-
-### 1. Model-Datei hinzufügen
-
-Kopieren Sie Ihre TFLite-Modell-Datei in den Assets-Ordner:
-
-```bash
-cp your_model.tflite app/src/main/assets/rf_detr_segmentation.tflite
-```
-
-### 2. Model-Anforderungen
-
-**Input (beide Modi):**
-- Shape: `[1, H, W, 3]` (NHWC Format)
-- Typ: Float32
-- Werte: RGB, normalisiert auf `[0, 1]`
-
-**Output - Object Detection:**
-```
-Output 0: boxes  - [1, num_queries, 4]  (normalized coordinates)
-Output 1: logits - [1, num_queries, num_classes] (class scores)
-```
-
-Unterstützte Box-Formate:
-- `CXCYWH`: Center X, Center Y, Width, Height (RF-DETR Standard)
-- `XYXY`: x1, y1, x2, y2 (Ecken)
-- `XYWH`: x, y, Width, Height (Top-Left + Größe)
-
-**Output - Semantic Segmentation:**
-```
-Output 0: mask - [1, H, W] oder [1, H, W, num_classes]
-```
-
-Bei Multi-Channel Output wird Argmax automatisch angewendet.
-
-### 3. Klassen-Labels konfigurieren
-
-In `MainActivity.kt`:
-
-```kotlin
-private val classLabels = listOf(
-    "Background",
-    "Defect",
-    "Person",
-    // ... weitere Labels
-)
-```
-
-### 4. Projekt öffnen
-
-1. Android Studio öffnen
-2. "Open an existing Android Studio project"
-3. Ordner `android-segmentation-app` auswählen
-4. Gradle Sync abwarten
-
-### 5. App starten
-
-1. Android-Gerät verbinden (USB-Debugging aktiviert)
-2. Run-Button klicken oder `Shift+F10`
-3. Kamera-Berechtigung erteilen
-
-## Technische Details
-
-### Auto-Detection Logik
-
-Das Modell wird automatisch klassifiziert:
-
-| Kriterium | Erkannter Typ |
-|-----------|---------------|
-| 2+ Outputs mit Shape `[1, N, 4]` und `[1, N, C]` | Object Detection |
-| 1 Output mit Shape `[1, H, W]` oder `[1, H, W, C]` | Segmentation |
-
-### Threading-Modell
+## Current Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │  Camera Thread  │ ──► │ Inference Thread │ ──► │  Render Thread  │
-│  (CameraX)      │     │  (ExecutorService)│     │  (SurfaceView)  │
+│  (CameraX)      │     │  (ONNX Runtime)  │     │  (SurfaceView)  │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
-- **Camera Thread**: Wird NIEMALS blockiert
-- **Inference Thread**: Dedizierter Background-Thread für ML
-- **Render Thread**: SurfaceView Rendering unabhängig vom UI-Thread
+## Project Structure
 
-### Hardware-Delegates
-
-| Priorität | Delegate | Beschreibung |
-|-----------|----------|--------------|
-| 1 | GPU | Beste Performance auf den meisten Geräten |
-| 2 | NNAPI | Neural Network API (Android 8.1+) |
-| 3 | CPU | Immer verfügbar, aber langsamer |
-
-## Konfiguration
-
-### TFLiteModel
-
-```kotlin
-model = TFLiteModel(this).apply {
-    // Klassen-Labels
-    classLabels = listOf("Background", "Cat", "Dog")
-
-    // Detection-spezifisch
-    confidenceThreshold = 0.5f  // Mindest-Konfidenz
-    nmsThreshold = 0.4f         // Non-Maximum Suppression IoU
-    boxFormat = TFLiteModel.BoxFormat.CXCYWH
-}
+```
+android-segmentation-app/
+├── app/src/main/
+│   ├── assets/
+│   │   └── rf_detr_detection.onnx    # ONNX model (~115MB)
+│   ├── java/com/segmentation/app/
+│   │   ├── MainActivity.kt           # Main activity, orchestration
+│   │   ├── ONNXModel.kt              # ONNX Runtime inference wrapper
+│   │   ├── CameraManager.kt          # CameraX frame extraction
+│   │   ├── OverlayRenderer.kt        # Bounding box rendering
+│   │   └── TFLiteModel.kt            # TFLite alternative (legacy)
+│   └── res/
+└── build.gradle.kts
 ```
 
-### OverlayRenderer
+## Quick Start
 
-```kotlin
-renderer = OverlayRenderer(binding.overlayView).apply {
-    // Segmentation
-    maskAlpha = 0.4f           // Masken-Transparenz (0-1)
+### 1. Build and Run
 
-    // Detection
-    boxStrokeWidth = 6f        // Box-Liniendicke
-    labelTextSize = 40f        // Label-Textgröße
-    showLabels = true          // Labels anzeigen
-    showConfidence = true      // Konfidenz anzeigen
-}
+1. Open `android-segmentation-app` in Android Studio
+2. Connect Android device (USB debugging enabled)
+3. Click Run or press `Shift+F10`
+4. Grant camera permission
+
+### 2. Default Model
+
+The app includes RF-DETR Medium pretrained on COCO (80 object classes).
+
+---
+
+# Integrating Custom Models
+
+## Prerequisites
+
+- Python 3.8+
+- PyTorch
+- RF-DETR library (`pip install rfdetr`)
+- ONNX (`pip install onnx onnxruntime`)
+
+## Step 1: Train Your Model
+
+Train RF-DETR on your custom dataset. See [RF-DETR documentation](https://github.com/roboflow/rf-detr).
+
+Your trained model will produce a `.pth` weights file.
+
+## Step 2: Export to ONNX
+
+### 2.1 Configure Export Script
+
+Edit `model-export/export_to_tflite_v2.py`:
+
+```python
+# =============================================================================
+# CONFIGURATION - MODIFY THESE FOR YOUR MODEL
+# =============================================================================
+
+MODEL_TYPE = "medium"      # Options: "nano", "small", "medium", "base", "large"
+NUM_CLASSES = 5            # Your number of classes (INCLUDING background if applicable)
+WEIGHTS_PATH = "my_custom_model.pth"  # Path to your trained weights
+
+INPUT_HEIGHT = 512         # Model input size
+INPUT_WIDTH = 512
+
+ONNX_PATH = "my_custom_model.onnx"  # Output filename
 ```
 
-## Farbtabelle
-
-| Klasse | Farbe | RGB |
-|--------|-------|-----|
-| 0 | Transparent | (Background) |
-| 1 | Rot | (255, 0, 0) |
-| 2 | Grün | (0, 255, 0) |
-| 3 | Blau | (0, 0, 255) |
-| 4 | Gelb | (255, 255, 0) |
-| 5 | Magenta | (255, 0, 255) |
-| 6+ | Auto-generiert | (HSV-basiert) |
-
-## Model Export (PyTorch → TFLite)
-
-Für RF-DETR Modelle:
+### 2.2 Run Export
 
 ```bash
 cd model-export
 
-# Abhängigkeiten installieren
-pip install torch torchvision onnx onnx-tf tensorflow rfdetr
+# Create virtual environment (recommended)
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or: venv\Scripts\activate  # Windows
 
-# Export ausführen
-python export_to_tflite.py
+# Install dependencies
+pip install torch rfdetr onnx onnxruntime
+
+# Run export
+python export_to_tflite_v2.py
 ```
 
-Das Skript führt folgende Schritte aus:
-1. PyTorch → ONNX
-2. ONNX → TensorFlow SavedModel
-3. TensorFlow SavedModel → TFLite
+### 2.3 Verify Export
 
-## Anforderungen
+The script will output verification results:
 
-- **minSdk**: 26 (Android 8.0)
-- **targetSdk**: 34 (Android 14)
-- **Kotlin**: 1.9.22
-- **CameraX**: 1.3.1
-- **TensorFlow Lite**: 2.13.0
+```
+Boxes shape: (300, 4)
+Boxes range: [0.0065, 1.0311]  # Should NOT be all zeros
+Logits shape: (300, N)         # N = your num_classes
+[OK] ONNX boxes have valid values
+```
+
+## Step 3: Deploy to Android
+
+### 3.1 Copy Model to Assets
+
+```bash
+cp my_custom_model.onnx ../android-segmentation-app/app/src/main/assets/
+```
+
+### 3.2 Update MainActivity.kt
+
+```kotlin
+companion object {
+    private const val ONNX_MODEL_FILE = "my_custom_model.onnx"  // Your model filename
+    private const val USE_ONNX = true  // Use ONNX Runtime
+}
+```
+
+### 3.3 Update Class Labels
+
+**For custom models with continuous class IDs (0 to N-1):**
+
+```kotlin
+private val classLabels = listOf(
+    "Background",    // Class 0 (if your model has background class)
+    "Defect_A",      // Class 1
+    "Defect_B",      // Class 2
+    "Defect_C",      // Class 3
+    // ... add all your classes
+)
+```
+
+**For COCO-pretrained models (IDs with gaps):**
+
+```kotlin
+// COCO uses non-consecutive IDs: 1,2,3...11, 13,14...
+// Gaps at: 12, 26, 29, 30, 45, 66, 68, 69, 71, 83
+private val cocoClassMap = mapOf(
+    0 to "Background",
+    1 to "Person", 2 to "Bicycle", 3 to "Car",
+    // ... see MainActivity.kt for full mapping
+    72 to "TV", 73 to "Laptop", 74 to "Mouse",
+)
+private val classLabels = (0..90).map { cocoClassMap[it] ?: "Class $it" }
+```
+
+### 3.4 Adjust Confidence Threshold
+
+```kotlin
+onnxModel = ONNXModel(this).apply {
+    classLabels = this@MainActivity.classLabels
+    confidenceThreshold = 0.1f  // RF-DETR typically needs lower threshold (0.1-0.3)
+}
+```
+
+### 3.5 Rebuild App
+
+Build and deploy from Android Studio.
+
+---
+
+## Model Input/Output Specification
+
+### Input Format
+
+| Property | Value |
+|----------|-------|
+| Shape | `[1, 3, 512, 512]` (NCHW) |
+| Type | Float32 |
+| Channel Order | RGB |
+| Normalization | ImageNet: `(pixel/255 - mean) / std` |
+| Mean | `[0.485, 0.456, 0.406]` |
+| Std | `[0.229, 0.224, 0.225]` |
+
+### Output Format
+
+| Output | Shape | Description |
+|--------|-------|-------------|
+| `boxes` | `[300, 4]` | Normalized CXCYWH coordinates |
+| `logits` | `[300, num_classes]` | Pre-sigmoid class logits |
+
+### Post-processing
+
+```
+confidence = sigmoid(max_logit)
+
+# Convert CXCYWH to corners
+left = cx - w/2
+top = cy - h/2
+right = cx + w/2
+bottom = cy + h/2
+```
+
+---
+
+## Configuration Options
+
+### ONNXModel Settings
+
+```kotlin
+onnxModel = ONNXModel(this).apply {
+    confidenceThreshold = 0.1f      // Detection threshold (0.0 - 1.0)
+    classLabels = listOf(...)       // Class names
+}
+```
+
+### OverlayRenderer Settings
+
+```kotlin
+renderer = OverlayRenderer(binding.overlayView).apply {
+    boxStrokeWidth = 6f             // Bounding box line width
+    labelTextSize = 40f             // Label font size
+    showLabels = true               // Show class names
+    showConfidence = true           // Show confidence percentages
+    maskAlpha = 0.4f                // For segmentation mode
+}
+```
+
+### Performance Tuning
+
+```kotlin
+// Process every Nth frame (higher = faster but less responsive)
+cameraManager.setFrameSkip(2)  // Options: 1, 2, 3
+```
+
+---
 
 ## Troubleshooting
 
-**"Failed to load model":**
-- Prüfen ob `.tflite` Datei in `assets/` liegt
-- Dateiname muss mit `MODEL_FILE` in MainActivity übereinstimmen
+### App crashes on startup
 
-**Falsche Detektionen/Masken:**
-- Box-Format prüfen (`CXCYWH` vs `XYXY`)
-- Confidence Threshold anpassen
-- Input-Normalisierung prüfen (muss [0,1] sein)
+**Symptom**: `OutOfMemoryError` or immediate crash
 
-**Niedrige FPS:**
-- Frame-Skip auf N=3 erhöhen
-- GPU Delegate prüfen
-- Model quantisieren (INT8)
+**Solution**:
+1. Add to `AndroidManifest.xml`:
+   ```xml
+   <application android:largeHeap="true" ...>
+   ```
+2. Model is loaded to cache first to avoid memory issues
 
-**Boxes an falscher Position:**
-- Koordinaten-System prüfen (normalisiert vs pixel)
-- Rotation-Handling kontrollieren
+### No detections showing
 
-## Lizenz
+**Possible causes**:
+1. `confidenceThreshold` too high - try lowering to 0.05f
+2. Wrong class labels - verify mapping matches model output
+3. Model weights not loaded during export - check export logs for "[OK] Loaded weights"
+
+### Wrong class labels
+
+**For COCO models**: Use the ID mapping with gaps (see above)
+**For custom models**: Use continuous 0 to N-1 indexing
+
+### Native crash (SIGABRT)
+
+**Symptom**: `Scudo ERROR: invalid chunk state`
+
+**Cause**: Double-free of ONNX tensors
+
+**Solution**: Only call `outputs.close()`, don't manually close individual tensors
+
+### Low FPS / Slow inference
+
+1. Increase frame skip to 3
+2. Use smaller model variant (nano, small)
+3. Reduce input resolution
+4. Consider INT8 quantization
+
+### All-zero bounding boxes (TFLite)
+
+**Cause**: RF-DETR's reference point computation breaks when `return_intermediate=False`
+
+**Solution**: Use ONNX Runtime instead of TFLite (set `USE_ONNX = true`)
+
+---
+
+## Performance Characteristics
+
+| Model | Size | Inference Time* | Memory |
+|-------|------|-----------------|--------|
+| RF-DETR Nano | ~25MB | ~150ms | ~200MB |
+| RF-DETR Small | ~50MB | ~300ms | ~300MB |
+| RF-DETR Medium | ~115MB | ~700ms | ~500MB |
+| RF-DETR Base | ~200MB | ~1200ms | ~800MB |
+
+*On mid-range Android device (CPU inference)
+
+**Note**: RF-DETR produces lower confidence scores (10-40%) compared to YOLO/SSD. This is normal behavior for this architecture.
+
+---
+
+## Requirements
+
+- **Android**: API 26+ (Android 8.0 Oreo)
+- **Storage**: ~200MB (app + model)
+- **RAM**: 2GB+ recommended
+
+## Dependencies
+
+| Library | Version |
+|---------|---------|
+| ONNX Runtime | 1.16.3 |
+| CameraX | 1.3.1 |
+| TensorFlow Lite | 2.13.0 (optional) |
+| Kotlin | 1.9.x |
+
+---
+
+## License
 
 MIT License
+
+## Acknowledgments
+
+- [RF-DETR](https://github.com/roboflow/rf-detr) by Roboflow
+- [ONNX Runtime](https://onnxruntime.ai/)
+- [CameraX](https://developer.android.com/training/camerax)
